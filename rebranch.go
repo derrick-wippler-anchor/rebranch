@@ -29,8 +29,13 @@ type CommitInfo struct {
 	Action  string `json:"action"` // "pick" or "drop"
 }
 
+// Options provides configuration for RunCmd
+type Options struct {
+	Editor EditorInterface
+}
+
 // RunCmd is the main entry point called from cmd/main.go
-func RunCmd(args []string) error {
+func RunCmd(args []string, opts Options) error {
 	if len(args) == 0 {
 		return errors.New("usage: rebranch <base-branch> | --continue | --done | --abort")
 	}
@@ -38,6 +43,11 @@ func RunCmd(args []string) error {
 	git, err := NewGit()
 	if err != nil {
 		return fmt.Errorf("failed to initialize git: %w", err)
+	}
+
+	editor := opts.Editor
+	if editor == nil {
+		editor = NewSystemEditor()
 	}
 
 	state, err := NewFileStore()
@@ -53,12 +63,12 @@ func RunCmd(args []string) error {
 	case "--abort":
 		return abortRebranch(git, state)
 	default:
-		return startRebranch(args[0], git, state)
+		return startRebranch(args[0], git, editor, state)
 	}
 }
 
-// startRebranch begins rebranching process (applies ALL commits, no interactive selection)
-func startRebranch(baseBranch string, git GitInterface, store Store) error {
+// startRebranch begins interactive rebranching process
+func startRebranch(baseBranch string, git GitInterface, editor EditorInterface, store Store) error {
 	if err := validateStart(baseBranch, git, store); err != nil {
 		return err
 	}
@@ -83,6 +93,25 @@ func startRebranch(baseBranch string, git GitInterface, store Store) error {
 		fmt.Printf("  %d. %s %s\n", i+1, commit.SHA[:7], commit.Message)
 	}
 
+	// Create and edit interactive file
+	pickFilePath := GetPickFilePath(git.GetRepoPath())
+	if err := CreateInteractiveFile(commits, pickFilePath); err != nil {
+		return fmt.Errorf("failed to create pick file: %w", err)
+	}
+
+	fmt.Printf("\nEdit the commit list and save to continue...\n")
+	if err := editor.LaunchEditor(pickFilePath); err != nil {
+		return fmt.Errorf("failed to launch editor: %w", err)
+	}
+
+	// Parse edited file
+	selectedCommits, err := ParseInteractiveFile(pickFilePath, commits)
+	if err != nil {
+		return fmt.Errorf("failed to parse pick file: %w", err)
+	}
+
+	fmt.Printf("\nSelected %d commits to apply\n", countPickedCommits(selectedCommits))
+
 	// Create temporary branch
 	tempBranch := fmt.Sprintf("%s%d", TempBranchPrefix, time.Now().Unix())
 	if err := git.CreateBranch(tempBranch, baseBranch); err != nil {
@@ -93,13 +122,13 @@ func startRebranch(baseBranch string, git GitInterface, store Store) error {
 		return err
 	}
 
-	// Save initial state (all commits will be picked)
+	// Save initial state with selected commits
 	state := &RebranchState{
 		SourceBranch:     sourceBranch,
 		BaseBranch:       baseBranch,
 		TempBranch:       tempBranch,
 		Stage:            "picking",
-		CommitsToApply:   commits, // Apply ALL commits in Phase 2
+		CommitsToApply:   selectedCommits,
 		CurrentCommitIdx: 0,
 	}
 
@@ -108,7 +137,7 @@ func startRebranch(baseBranch string, git GitInterface, store Store) error {
 	}
 
 	// Start cherry-picking
-	return applyCherryPicks(git, store, state)
+	return ApplyCherryPicks(git, store, state)
 }
 
 // continueRebranch resumes after conflict resolution
@@ -125,11 +154,11 @@ func continueRebranch(git GitInterface, state Store) error {
 	rebranchState.CurrentCommitIdx++ // Move to next commit
 	rebranchState.Stage = "picking"
 
-	return applyCherryPicks(git, state, rebranchState)
+	return ApplyCherryPicks(git, state, rebranchState)
 }
 
-// applyCherryPicks applies remaining commits from current index
-func applyCherryPicks(git GitInterface, store Store, state *RebranchState) error {
+// ApplyCherryPicks applies remaining commits from current index
+func ApplyCherryPicks(git GitInterface, store Store, state *RebranchState) error {
 	for i := state.CurrentCommitIdx; i < len(state.CommitsToApply); i++ {
 		commit := state.CommitsToApply[i]
 		if commit.Action == "drop" {

@@ -27,6 +27,7 @@ type GitInterface interface {
 	IsCleanWorkingDirectory() (bool, error)
 	HasOngoingOperation() (bool, string, error)
 	IsValidRepository() error
+	GetRepoPath() string
 }
 
 // Git implements GitInterface using hybrid go-git + exec.Command approach
@@ -292,4 +293,8 @@ func (g *Git) isAncestor(ancestor, descendant plumbing.Hash) (bool, error) {
 	}
 
 	return descendantCommit.IsAncestor(ancestorCommit)
+}
+
+func (g *Git) GetRepoPath() string {
+	return g.repoPath
 }
