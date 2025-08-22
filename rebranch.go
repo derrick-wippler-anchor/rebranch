@@ -37,7 +37,10 @@ type Options struct {
 // RunCmd is the main entry point called from cmd/main.go
 func RunCmd(args []string, opts Options) error {
 	if len(args) == 0 {
-		return errors.New("usage: rebranch <base-branch> | --continue | --done | --abort")
+		return errors.New("no command provided\n" +
+			"\n" +
+			"Usage: rebranch <base-branch> | --continue | --done | --abort\n" +
+			"Run 'rebranch --help' for more information")
 	}
 
 	git, err := NewGit()
@@ -85,7 +88,13 @@ func startRebranch(baseBranch string, git GitInterface, editor EditorInterface, 
 	}
 
 	if len(commits) == 0 {
-		return errors.New("no commits to rebranch")
+		return fmt.Errorf("no commits to rebranch from '%s' onto '%s'\n"+
+			"\n"+
+			"Possible reasons:\n"+
+			"  • Current branch is up-to-date with base branch\n"+
+			"  • Current branch has no unique commits\n"+
+			"  • Check commit history: git log --oneline %s..%s", 
+			sourceBranch, baseBranch, baseBranch, sourceBranch)
 	}
 
 	fmt.Printf("Found %d commits to rebranch from %s onto %s\n", len(commits), sourceBranch, baseBranch)
@@ -172,8 +181,15 @@ func ApplyCherryPicks(git GitInterface, store Store, state *RebranchState) error
 			if saveErr := store.SaveState(state); saveErr != nil {
 				return fmt.Errorf("cherry-pick failed and could not save state: %v", saveErr)
 			}
-			return fmt.Errorf("conflict during cherry-pick of %s\n"+
-				"Resolve conflicts and run: rebranch --continue", commit.SHA[:7])
+			return fmt.Errorf("conflict during cherry-pick of %s (%s)\n"+
+				"\n"+
+				"To resolve:\n"+
+				"  1. Edit conflicted files to resolve conflicts\n"+
+				"  2. Stage resolved files: git add <files>\n"+
+				"  3. Continue rebranch: rebranch --continue\n"+
+				"  4. Or abort rebranch: rebranch --abort\n"+
+				"\n"+
+				"View conflict status: git status", commit.SHA[:7], commit.Message)
 		}
 
 		state.CurrentCommitIdx = i

@@ -14,7 +14,12 @@ func validateStart(baseBranch string, git GitInterface, state Store) error {
 
 	// Check if there's already an ongoing rebranch operation
 	if state.StateExists() {
-		return errors.New("rebranch operation already in progress. Use --continue, --done, or --abort")
+		return errors.New("rebranch operation already in progress\n" +
+			"\n" +
+			"Available actions:\n" +
+			"  • Continue: rebranch --continue (after resolving conflicts)\n" +
+			"  • Complete: rebranch --done (if cherry-picking finished)\n" +
+			"  • Cancel: rebranch --abort (revert to original state)")
 	}
 
 	// Check for other ongoing git operations
@@ -23,7 +28,12 @@ func validateStart(baseBranch string, git GitInterface, state Store) error {
 		return fmt.Errorf("failed to check for ongoing operations: %w", err)
 	}
 	if hasOp {
-		return fmt.Errorf("cannot start rebranch: %s operation is in progress", opType)
+		return fmt.Errorf("cannot start rebranch: %s operation is in progress\n"+
+			"\n"+
+			"Please complete the ongoing %s operation first:\n"+
+			"  • View status: git status\n"+
+			"  • Complete or abort the current operation\n"+
+			"  • Then retry rebranch", opType, opType)
 	}
 
 	// Check if working directory is clean
@@ -32,12 +42,22 @@ func validateStart(baseBranch string, git GitInterface, state Store) error {
 		return fmt.Errorf("failed to check working directory status: %w", err)
 	}
 	if !isClean {
-		return errors.New("working directory is not clean. Please commit or stash changes before rebranching")
+		return errors.New("working directory is not clean\n" +
+			"\n" +
+			"Please resolve before rebranching:\n" +
+			"  • Commit changes: git add . && git commit -m \"Your message\"\n" +
+			"  • Or stash changes: git stash\n" +
+			"  • Check status: git status")
 	}
 
 	// Check if base branch exists
 	if !git.BranchExists(baseBranch) {
-		return fmt.Errorf("base branch '%s' does not exist", baseBranch)
+		return fmt.Errorf("base branch '%s' does not exist\n"+
+			"\n"+
+			"Suggestions:\n"+
+			"  • Check branch name spelling\n"+
+			"  • Run 'git branch -a' to see all available branches\n"+
+			"  • Create the branch: git checkout -b %s", baseBranch, baseBranch)
 	}
 
 	// Get current branch
@@ -48,7 +68,12 @@ func validateStart(baseBranch string, git GitInterface, state Store) error {
 
 	// Check if current branch is different from base branch
 	if currentBranch == baseBranch {
-		return fmt.Errorf("current branch '%s' is the same as base branch '%s'", currentBranch, baseBranch)
+		return fmt.Errorf("current branch '%s' is the same as base branch '%s'\n"+
+			"\n"+
+			"Suggestions:\n"+
+			"  • Create a feature branch: git checkout -b feature-branch\n"+
+			"  • Or switch to a different branch: git checkout <branch-name>", 
+			currentBranch, baseBranch)
 	}
 
 	return nil
